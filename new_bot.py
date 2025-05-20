@@ -2707,18 +2707,107 @@ def handle_audio(message):
 def echo_all(message):
     """الرد على جميع الرسائل الأخرى"""
     bot.reply_to(message, "هذا بوت لمعالجة الملفات الصوتية. أرسل /help للمساعدة.")
+@bot.message_handler(content_types=['audio'])
+def handle_audio(message):
+    """التعامل مع الملفات الصوتية المرسلة إلى البوت أو القناة"""
+    audio = message.audio
 
+    # دعم channel_post (من القناة) حيث لا يوجد from_user
+    if message.from_user:
+        user_id = message.from_user.id
+        first_name = message.from_user.first_name
+    else:
+        user_id = None
+        first_name = message.chat.title if hasattr(message.chat, 'title') else "قناة"
 
-@bot.channel_post_handler(content_types=['audio'])
-def handle_channel_audio(message):
-    """معالجة الملفات الصوتية المرسلة في القناة"""
+    logger.info(f"تم استلام ملف صوتي من {first_name} ({user_id}): {audio.file_name}")
+
+    # إخبار المستخدم بأننا نعالج الملف، فقط إذا كانت رسالة خاصة أو جروب
+    if user_id:
+        processing_msg = bot.reply_to(message, 
+            f"تم استلام الملف الصوتي: {audio.file_name}\n"
+            "جاري معالجة الملف..."
+        )
+    else:
+        processing_msg = None
+
     try:
-        if message.chat.username == SOURCE_CHANNEL.replace("@", "") or str(message.chat.id) == SOURCE_CHANNEL.replace("@", ""):
-            logger.info(f"تم استلام ملف صوتي من القناة المصدر: {message.audio.file_name}")
-            handle_audio(message)
-    except Exception as e:
-        logger.error(f"خطأ في معالجة ملف صوتي من القناة: {e}")
+        # تحميل الملف الصوتي
+        file_path = download_file(audio.file_id)
 
+        if not file_path:
+            if processing_msg:
+                bot.edit_message_text(
+                    "⚠️ حدث خطأ أثناء تحميل الملف الصوتي.",
+                    chat_id=message.chat.id,
+                    message_id=processing_msg.message_id
+                )
+            else:
+                logger.error("⚠️ حدث خطأ أثناء تحميل الملف الصوتي.")
+            return
+
+        # استخراج العنوان من وصف الرسالة أو اسم الملف
+        title = message.caption if message.caption else os.path.splitext(audio.file_name)[0]
+
+        # معالجة وسوم الملف الصوتي
+        success = process_audio_tags(file_path, title)
+
+        if success:
+            # إعادة إرسال الملف مع الوسوم المعدلة
+            with open(file_path, 'rb') as audio_file:
+                current_template = templates[current_template_key]
+                # إذا من قناة، أرسل للهدف فقط، إذا من مستخدم أرسل له وللقناة الهدف إن وجد
+                if user_id:
+                    bot.send_audio(
+                        message.chat.id,
+                        audio_file,
+                        caption=f"تم معالجة الملف الصوتي: {audio.file_name}",
+                        title=title,
+                        performer=current_template["artist"],
+                    )
+                # إعادة نشر في قناة الهدف إذا تم ضبطها
+                if TARGET_CHANNEL:
+                    with open(file_path, 'rb') as audio_file2:
+                        bot.send_audio(
+                            TARGET_CHANNEL,
+                            audio_file2,
+                            caption=message.caption if message.caption else f"تم نشر الملف الصوتي: {title}",
+                            title=title,
+                            performer=current_template["artist"],
+                        )
+                    logger.info(f"📢 تم إعادة نشر الملف الصوتي في القناة: {TARGET_CHANNEL}")
+                    if user_id:
+                        bot.send_message(
+                            message.chat.id,
+                            f"📢 تم إعادة نشر الملف الصوتي في القناة: {TARGET_CHANNEL}"
+                        )
+            # إبلاغ المستخدم بالتعديلات التي تمت
+            if processing_msg and user_id:
+                bot.edit_message_text(
+                    f"✅ تم معالجة الملف الصوتي بنجاح!\n"
+                    f"🎵 العنوان: {title}\n"
+                    f"👤 الفنان: {current_template['artist']}\n"
+                    f"💿 الألبوم: {current_template['album']}",
+                    chat_id=message.chat.id,
+                    message_id=processing_msg.message_id
+                )
+        else:
+            if processing_msg and user_id:
+                bot.edit_message_text(
+                    "⚠️ حدث خطأ أثناء معالجة وسوم الملف الصوتي.",
+                    chat_id=message.chat.id,
+                    message_id=processing_msg.message_id
+                )
+            else:
+                logger.error("⚠️ حدث خطأ أثناء معالجة وسوم الملف الصوتي.")
+    except Exception as e:
+        logger.error(f"خطأ في معالجة الملف الصوتي: {e}")
+        if processing_msg and user_id:
+            bot.edit_message_text(
+                f"⚠️ حدث خطأ أثناء معالجة الملف الصوتي: {str(e)}",
+                chat_id=message.chat.id,
+                message_id=processing_msg.message_id
+            )
 # وظائف حفظ واسترجاع البيانات
 def reset_data():
     """إعادة تعيين جميع البيانات إلى القيم الافتراضية"""
