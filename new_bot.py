@@ -21,6 +21,13 @@ import psycopg2
 from psycopg2 import pool
 from datetime import datetime
 
+# تكوين السجلات (logger) في أول الكود قبل أي استخدام له
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
 # إعداد قاعدة البيانات
 DATABASE_URL = os.getenv('DATABASE_URL')
 connection_pool = None
@@ -66,6 +73,8 @@ if DATABASE_URL:
         connection_pool = None
 else:
     logger.warning("لم يتم العثور على رابط قاعدة البيانات")
+
+# ... بقية الكود كما هو بدون تغيير ... 
 
 def log_edit(file_name, edit_type, edit_details, user_id):
     """تسجيل التعديلات في قاعدة البيانات"""
